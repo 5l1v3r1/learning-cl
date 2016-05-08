@@ -15,6 +15,7 @@ int main(int argc, const char ** argv) {
   }
 
   // TODO: blur the image and write it to a file here.
+
   if (bmp_write(inputImage, argv[2])) {
     fprintf(stderr, "Could not create output image: %s\n", argv[2]);
     bmp_free(inputImage);

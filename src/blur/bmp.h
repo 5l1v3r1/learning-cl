@@ -1,3 +1,6 @@
+#ifndef __BMP_H__
+#define __BMP_H__
+
 #include <OpenCL/opencl.h>
 
 typedef struct {
@@ -9,3 +12,5 @@ typedef struct {
 bmp_t * bmp_read(const char * path);
 int bmp_write(bmp_t * b, const char * path);
 void bmp_free(bmp_t * b);
+
+#endif

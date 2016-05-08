@@ -4,7 +4,7 @@ BUILD_FILES = $(addprefix build/, $(notdir $(SOURCE_DIRECTORIES:%/=%)))
 all: $(BUILD_FILES)
 
 build/%: src/% build/
-	gcc -Wall $</*.c -o $@ -framework OpenCL
+	gcc -std=c99 -Wall $</*.c -o $@ -framework OpenCL
 
 build:
 	mkdir build/
