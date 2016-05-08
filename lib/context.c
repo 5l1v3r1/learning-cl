@@ -90,9 +90,11 @@ context_t * context_create(context_params_t * params) {
   return ctx;
 }
 
-int context_set_params(context_t * ctx, int idx, size_t count, void ** params, size_t * sizes) {
+int context_set_params(context_t * ctx, int kernelIdx, size_t count,
+                       void ** params, size_t * sizes) {
+  cl_kernel kernel = ctx->kernels[kernelIdx];
   for (size_t i = 0; i < count; ++i) {
-    if (clSetKernelArg(ctx->kernels[idx], i, sizes[idx], params[i])) {
+    if (clSetKernelArg(kernel, i, sizes[i], params[i])) {
       return -1;
     }
   }

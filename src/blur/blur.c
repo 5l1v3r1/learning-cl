@@ -66,7 +66,7 @@ static cl_float * make_weights(int radius, cl_float sigma) {
 static const char * blurKernel = "\
 __kernel void blur(__global uchar4 * input, __global uchar4 * output, \
                    __global float * weights, int radius, int width) { \
-  /*int globalX = get_global_id(0); \
+  int globalX = get_global_id(0); \
   int globalY = get_global_id(1); \
   int inputRow = globalX + (globalY-radius)*width; \
   int weightIdx = 0; \
@@ -79,7 +79,7 @@ __kernel void blur(__global uchar4 * input, __global uchar4 * output, \
     } \
     inputRow += width; \
   } \
-  output[globalX + globalY*width] = convert_uchar4_sat(outputFloat);*/ \
+  output[globalX + globalY*width] = convert_uchar4_sat(outputFloat); \
 } \
 ";
 
