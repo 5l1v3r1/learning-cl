@@ -52,8 +52,18 @@ int blur_image(bmp_t * image, int radius, cl_float sigma) {
     return -1;
   }
 
-  memcpy(image->pixels, output, bitmapSize);
+  void * buff = clEnqueueMapBuffer(ctx->queue, ctx->outputBuffer, CL_TRUE, CL_MAP_READ,
+    0, bitmapSize, 0, NULL, NULL, NULL);
+  if (!buff) {
+    context_destroy(ctx);
+    free(weights);
+    free(output);
+    return -1;
+  }
 
+  memcpy(image->pixels, buff, bitmapSize);
+
+  clEnqueueUnmapMemObject(ctx->queue, ctx->outputBuffer, buff, 0, NULL, NULL);
   context_destroy(ctx);
   free(output);
   free(weights);
