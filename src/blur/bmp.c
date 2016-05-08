@@ -140,8 +140,13 @@ void bmp_free(bmp_t * b) {
 }
 
 static uint8_t * read_padded_rgb_data(FILE * fp, bmp_header_t head) {
-  size_t pixelCount = (size_t)(head.width * head.height);
-  size_t dataSize = pixelCount * 3;
+  size_t lineSize = head.width * 3;
+  size_t linePadding = 0;
+  if (lineSize % 4) {
+    linePadding = 4 - (lineSize % 4);
+    lineSize += linePadding;
+  }
+  size_t dataSize = lineSize * head.height;
   uint8_t * data = (uint8_t *)malloc(dataSize);
 
   if (!data) {
@@ -154,6 +159,7 @@ static uint8_t * read_padded_rgb_data(FILE * fp, bmp_header_t head) {
   }
   fclose(fp);
 
+  size_t pixelCount = head.width * head.height;
   uint8_t * paddedBuff = (uint8_t *)malloc(pixelCount * 4);
 
   if (!paddedBuff) {
@@ -161,14 +167,16 @@ static uint8_t * read_padded_rgb_data(FILE * fp, bmp_header_t head) {
     return NULL;
   }
 
-  size_t i;
-  for (i = 0; i < pixelCount; i++) {
-    size_t sourceIdx = i * 3;
-    size_t destIdx = i * 4;
-    paddedBuff[destIdx++] = data[sourceIdx++];
-    paddedBuff[destIdx++] = data[sourceIdx++];
-    paddedBuff[destIdx++] = data[sourceIdx++];
-    paddedBuff[destIdx] = 0;
+  size_t destIdx = 0;
+  size_t sourceIdx = 0;
+  for (size_t y = 0; y < head.height; ++y) {
+    for (size_t x = 0; x < head.width; ++x) {
+      paddedBuff[destIdx++] = data[sourceIdx++];
+      paddedBuff[destIdx++] = data[sourceIdx++];
+      paddedBuff[destIdx++] = data[sourceIdx++];
+      paddedBuff[destIdx++] = 0;
+    }
+    sourceIdx += linePadding;
   }
 
   free(data);
