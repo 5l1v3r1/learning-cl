@@ -1,28 +1,13 @@
 #include "blur.h"
+#include "context.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define PRINT_PROGRAM_LOG 1
-
-typedef struct {
-  cl_platform_id platform;
-  cl_device_id device;
-  cl_context context;
-  cl_command_queue queue;
-  cl_mem inputBuffer;
-  cl_mem outputBuffer;
-  cl_mem weightBuffer;
-  cl_program program;
-  cl_kernel kernel;
-} context;
-
 static cl_float * make_weights(int radius, cl_float sigma);
-static context * context_create(size_t bitmapSize, void * input, void * output,
-                                void * weights, cl_int radius, cl_int width);
-static int context_run(context * ctx, size_t radius, size_t width, size_t height);
-static void context_destroy(context * ctx);
+static context_t * create_blur_context(bmp_t * input, int radius, cl_float * weights);
+static int run_blur_context(context_t * ctx, bmp_t * input, int radius);
 
 int blur_image(bmp_t * image, int radius, cl_float sigma) {
   cl_float * weights = make_weights(radius, sigma);
@@ -30,43 +15,27 @@ int blur_image(bmp_t * image, int radius, cl_float sigma) {
     return -1;
   }
 
-  size_t bitmapSize = sizeof(cl_uchar4) * image->width * image->height;
-  cl_uchar4 * output = malloc(bitmapSize);
-  if (!output) {
-    free(weights);
-    return -1;
-  }
-
-  context * ctx = context_create(bitmapSize, image->pixels, output, weights,
-    radius, image->width);
-  if (!ctx) {
-    free(weights);
-    free(output);
-    return -1;
-  }
-
-  if (context_run(ctx, radius, image->width, image->height)) {
-    context_destroy(ctx);
-    free(weights);
-    free(output);
-    return -1;
-  }
-
-  void * buff = clEnqueueMapBuffer(ctx->queue, ctx->outputBuffer, CL_TRUE, CL_MAP_READ,
-    0, bitmapSize, 0, NULL, NULL, NULL);
-  if (!buff) {
-    context_destroy(ctx);
-    free(weights);
-    free(output);
-    return -1;
-  }
-
-  memcpy(image->pixels, buff, bitmapSize);
-
-  clEnqueueUnmapMemObject(ctx->queue, ctx->outputBuffer, buff, 0, NULL, NULL);
-  context_destroy(ctx);
-  free(output);
+  context_t * ctx = create_blur_context(image, radius, weights);
   free(weights);
+
+  if (!ctx) {
+    return -1;
+  }
+
+  if (run_blur_context(ctx, image, radius)) {
+    context_free(ctx);
+    return -1;
+  }
+
+  void * output = context_map(ctx, 1, CL_FALSE);
+  if (!output) {
+    context_free(ctx);
+    return -1;
+  }
+  memcpy(image->pixels, output, ctx->bufferSizes[0]);
+  context_unmap(ctx, 1, output);
+
+  context_free(ctx);
   return 0;
 }
 
@@ -97,7 +66,7 @@ static cl_float * make_weights(int radius, cl_float sigma) {
 static const char * blurKernel = "\
 __kernel void blur(__global uchar4 * input, __global uchar4 * output, \
                    __global float * weights, int radius, int width) { \
-  int globalX = get_global_id(0); \
+  /*int globalX = get_global_id(0); \
   int globalY = get_global_id(1); \
   int inputRow = globalX + (globalY-radius)*width; \
   int weightIdx = 0; \
@@ -110,167 +79,59 @@ __kernel void blur(__global uchar4 * input, __global uchar4 * output, \
     } \
     inputRow += width; \
   } \
-  output[globalX + globalY*width] = convert_uchar4_sat(outputFloat); \
+  output[globalX + globalY*width] = convert_uchar4_sat(outputFloat);*/ \
 } \
 ";
 
-static context * context_create(size_t bitmapSize, void * input, void * output,
-                                void * weights, cl_int radius, cl_int width) {
-  cl_uint resultCount;
-  cl_int statusCode;
+static const char * blurKernelName = "blur";
 
-  cl_platform_id platform;
-  if (clGetPlatformIDs(1, &platform, &resultCount) || resultCount != 1) {
+static context_t * create_blur_context(bmp_t * input, cl_int radius, cl_float * weights) {
+  size_t bitmapSize = input->width * input->height * sizeof(cl_uchar4);
+  size_t bufferSizes[3] = {bitmapSize, bitmapSize,
+    (radius*2 + 1) * (radius*2 + 1) * sizeof(cl_float)};
+  context_params_t params;
+  params.program = blurKernel;
+  params.kernelCount = 1;
+  params.kernelNames = &blurKernelName;
+  params.bufferCount = 3;
+  params.bufferSizes = bufferSizes;
+
+  context_t * ctx = context_create(&params);
+  if (!ctx) {
     return NULL;
   }
 
-  cl_device_id devices[10];
-  if (clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 10, devices, &resultCount)) {
-    return NULL;
-  } else if (resultCount == 0) {
-    return NULL;
-  }
-
-  // Every time I've tried, the discrete chip is
-  // the last element of this array. Really, we
-  // should have a method called preferred_device()
-  // or something.
-  cl_device_id device = devices[resultCount-1];
-
-  context * ctx = (context *)malloc(sizeof(context));
-  bzero(ctx, sizeof(context));
-  ctx->platform = platform;
-  ctx->device = device;
-
-  ctx->context = clCreateContext(0, 1, &device, NULL, NULL, &statusCode);
-  if (statusCode) {
-    context_destroy(ctx);
+  void * inputBuf = context_map(ctx, 0, CL_TRUE);
+  if (!inputBuf) {
+    context_free(ctx);
     return NULL;
   }
+  memcpy(inputBuf, input->pixels, bitmapSize);
+  context_unmap(ctx, 0, inputBuf);
 
-  ctx->queue = clCreateCommandQueue(ctx->context, device, 0, &statusCode);
-  if (statusCode) {
-    context_destroy(ctx);
+  void * weightBuf = context_map(ctx, 2, CL_TRUE);
+  if (!weightBuf) {
+    context_free(ctx);
     return NULL;
   }
+  memcpy(weightBuf, weights, bufferSizes[2]);
+  context_unmap(ctx, 2, weightBuf);
 
-  ctx->inputBuffer = clCreateBuffer(ctx->context, CL_MEM_READ_ONLY|CL_MEM_USE_HOST_PTR,
-    bitmapSize, input, &statusCode);
-  if (statusCode) {
-    context_destroy(ctx);
-    return NULL;
-  }
-
-  ctx->outputBuffer = clCreateBuffer(ctx->context, CL_MEM_READ_WRITE|CL_MEM_USE_HOST_PTR,
-    bitmapSize, output, &statusCode);
-  if (statusCode) {
-    context_destroy(ctx);
-    return NULL;
-  }
-
-  size_t weightsSide = radius*2 + 1;
-  size_t weightCount = weightsSide * weightsSide;
-  ctx->weightBuffer = clCreateBuffer(ctx->context, CL_MEM_READ_ONLY|CL_MEM_USE_HOST_PTR,
-    weightCount*sizeof(cl_float), weights, &statusCode);
-  if (statusCode) {
-    context_destroy(ctx);
-    return NULL;
-  }
-
-  size_t kernelLen = strlen(blurKernel);
-  ctx->program = clCreateProgramWithSource(ctx->context, 1, &blurKernel,
-    &kernelLen, &statusCode);
-  if (statusCode) {
-    context_destroy(ctx);
-    return NULL;
-  }
-
-  if (clBuildProgram(ctx->program, 1, &device, NULL, NULL, NULL)) {
-    if (PRINT_PROGRAM_LOG) {
-      size_t logSize;
-      clGetProgramBuildInfo(ctx->program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &logSize);
-
-      char * logInfo = (char *)malloc(logSize);
-      clGetProgramBuildInfo(ctx->program, device, CL_PROGRAM_BUILD_LOG, logSize, logInfo, NULL);
-
-      printf("%s\n", logInfo);
-      free(logInfo);
-    }
-
-    context_destroy(ctx);
-    return NULL;
-  }
-
-  ctx->kernel = clCreateKernel(ctx->program, "blur", &statusCode);
-  if (statusCode) {
-    context_destroy(ctx);
-    return NULL;
-  }
-
-  void * args[3] = {&ctx->inputBuffer, &ctx->outputBuffer, &ctx->weightBuffer};
-  for (int i = 0; i < 3; i++) {
-    if (clSetKernelArg(ctx->kernel, i, sizeof(ctx->inputBuffer), args[i])) {
-      context_destroy(ctx);
-      return NULL;
-    }
-  }
-
-  if (clSetKernelArg(ctx->kernel, 3, sizeof(radius), &radius)) {
-    context_destroy(ctx);
-    return NULL;
-  }
-
-  if (clSetKernelArg(ctx->kernel, 4, sizeof(width), &width)) {
-    context_destroy(ctx);
+  cl_int width = input->width;
+  void * args[5] = {&ctx->buffers[0], &ctx->buffers[1], &ctx->buffers[2],
+    &radius, &width};
+  size_t sizes[5] = {sizeof(cl_mem), sizeof(cl_mem), sizeof(cl_mem),
+    sizeof(cl_int), sizeof(cl_int)};
+  if (context_set_params(ctx, 0, 5, args, sizes)) {
+    context_free(ctx);
     return NULL;
   }
 
   return ctx;
 }
 
-static int context_run(context * ctx, size_t radius, size_t width, size_t height) {
-  cl_event event;
-  size_t workSizes[2] = {width - radius*2, height - radius*2};
+static int run_blur_context(context_t * ctx, bmp_t * input, int radius) {
+  size_t workSizes[2] = {input->width - radius*2, input->height - radius*2};
   size_t workOffsets[2] = {radius, radius};
-  if (clEnqueueNDRangeKernel(ctx->queue, ctx->kernel, 2, workOffsets, workSizes,
-      NULL, 0, NULL, &event)) {
-    return -1;
-  }
-
-  cl_int res = clWaitForEvents(1, &event);
-  clReleaseEvent(event);
-  if (res) {
-    return -1;
-  } else {
-    return 0;
-  }
-}
-
-static void context_destroy(context * ctx) {
-  if (ctx->queue) {
-    clFlush(ctx->queue);
-    clFinish(ctx->queue);
-  }
-  if (ctx->program) {
-    clReleaseProgram(ctx->program);
-  }
-  if (ctx->inputBuffer) {
-    clReleaseMemObject(ctx->inputBuffer);
-  }
-  if (ctx->outputBuffer) {
-    clReleaseMemObject(ctx->outputBuffer);
-  }
-  if (ctx->weightBuffer) {
-    clReleaseMemObject(ctx->weightBuffer);
-  }
-  if (ctx->queue) {
-    clReleaseCommandQueue(ctx->queue);
-  }
-  if (ctx->context) {
-    clReleaseContext(ctx->context);
-  }
-  if (ctx->kernel) {
-    clReleaseKernel(ctx->kernel);
-  }
-  free(ctx);
+  return context_run_nd(ctx, 0, 2, workOffsets, workSizes);
 }
