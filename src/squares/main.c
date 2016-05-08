@@ -1,4 +1,5 @@
 #include <OpenCL/opencl.h>
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/time.h>
@@ -128,6 +129,24 @@ int main() {
     return 1;
   }
 
+  void * buff = clEnqueueMapBuffer(queue, buffer, CL_TRUE, CL_MAP_READ,
+    0, NUMBER_LIST_SIZE*sizeof(cl_float), 0, NULL, NULL, NULL);
+  if (!buff) {
+    clFinish(queue);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
+    clReleaseMemObject(buffer);
+    clReleaseCommandQueue(queue);
+    clReleaseContext(context);
+    free(list);
+    fprintf(stderr, "Failed to wait for event.\n");
+    return 1;
+  }
+
+  assert(buff == (void *)list);
+
+  clEnqueueUnmapMemObject(queue, buffer, buff, 0, NULL, NULL);
+
   long long duration = microtime() - startTime;
 
   printf("GPU completed %d multiplies in %lld microseconds.\n", NUMBER_LIST_SIZE, duration);
@@ -152,6 +171,7 @@ int main() {
 
   clFlush(queue);
   clFinish(queue);
+  clReleaseKernel(kernel);
   clReleaseProgram(program);
   clReleaseMemObject(buffer);
   clReleaseCommandQueue(queue);
