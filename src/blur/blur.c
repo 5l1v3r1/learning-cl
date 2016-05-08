@@ -72,7 +72,7 @@ static cl_float * make_weights(int radius, cl_float sigma) {
   for (int y = -radius; y <= radius; ++y) {
     for (int x = -radius; x <= radius; ++x) {
       cl_float dist = (cl_float)(x*x + y*y);
-      weights[weightIdx] = (cl_float)expf((float)dist / (2 * sigma * sigma));
+      weights[weightIdx] = (cl_float)expf(-(float)dist / (2 * sigma * sigma));
       weightSum += weights[weightIdx];
       ++weightIdx;
     }
@@ -86,14 +86,14 @@ static cl_float * make_weights(int radius, cl_float sigma) {
 
 static const char * blurKernel = "\
 __kernel void blur(__global uchar4 * input, __global uchar4 * output, \
-              __global float * weights, int radius, int width) { \
+                   __global float * weights, int radius, int width) { \
   int globalX = get_global_id(0); \
   int globalY = get_global_id(1); \
-  int inputRow = globalX + globalY*width; \
+  int inputRow = globalX + (globalY-radius)*width; \
   int weightIdx = 0; \
   float4 outputFloat = 0; \
   for (int y = globalY-radius; y <= globalY+radius; ++y) { \
-    for (int x = globalX-radius; x <= globalX+radius; ++x) { \
+    for (int x = -radius; x <= radius; ++x) { \
       float4 fIn = convert_float4(input[inputRow + x]); \
       float weight = weights[weightIdx++]; \
       outputFloat += fIn * weight; \
