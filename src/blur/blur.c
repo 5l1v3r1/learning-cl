@@ -124,12 +124,18 @@ static context * context_create(size_t bitmapSize, void * input, void * output,
     return NULL;
   }
 
-  cl_device_id device;
-  if (clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, &resultCount)) {
+  cl_device_id devices[10];
+  if (clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 10, devices, &resultCount)) {
     return NULL;
   } else if (resultCount == 0) {
     return NULL;
   }
+
+  // Every time I've tried, the discrete chip is
+  // the last element of this array. Really, we
+  // should have a method called preferred_device()
+  // or something.
+  cl_device_id device = devices[resultCount-1];
 
   context * ctx = (context *)malloc(sizeof(context));
   bzero(ctx, sizeof(context));
