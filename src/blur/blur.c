@@ -1,8 +1,28 @@
 #include "blur.h"
-#include "math.h"
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+  cl_platform_id platform;
+  cl_device_id device;
+  cl_context context;
+  cl_command_queue queue;
+  cl_mem inputBuffer;
+  cl_mem outputBuffer;
+  cl_mem weightBuffer;
+  cl_program program;
+  cl_kernel kernel;
+} context;
+
+static cl_float * make_weights(int radius, cl_float sigma);
+static context * context_create(size_t bitmapSize, void * input, void * output,
+                                void * weights, cl_int radius, cl_int width);
+static int context_run(context * ctx, size_t radius, size_t width, size_t height);
+static void context_destroy(context * ctx);
 
 int blur_image(bmp_t * image, int radius, cl_float sigma) {
-  cl_float * weights = make_weights(radius);
+  cl_float * weights = make_weights(radius, sigma);
   if (!weights) {
     return -1;
   }
@@ -14,17 +34,18 @@ int blur_image(bmp_t * image, int radius, cl_float sigma) {
   }
 
   size_t bitmapSize = image->width * image->height * sizeof(cl_uchar4);
-  context * ctx = context_create(bitmapSize, image->pixels, output, weights, radius);
+  context * ctx = context_create(bitmapSize, image->pixels, output, weights,
+    radius, image->width);
   if (!ctx) {
     free(weights);
     free(output);
     return -1;
   }
 
-  if (context_run(ctx)) {
+  if (context_run(ctx, radius, image->width, image->height)) {
     context_destroy(ctx);
     free(weights);
-    free(outputs);
+    free(output);
     return -1;
   }
 
@@ -36,7 +57,7 @@ int blur_image(bmp_t * image, int radius, cl_float sigma) {
   return 0;
 }
 
-cl_float * make_weights(int radius) {
+static cl_float * make_weights(int radius, cl_float sigma) {
   size_t weightsSide = radius*2 + 1;
   size_t weightCount = weightsSide * weightsSide;
   cl_float * weights = (cl_float *)malloc(weightCount * sizeof(cl_float));
@@ -55,32 +76,33 @@ cl_float * make_weights(int radius) {
   }
   cl_float weightNorm = 1 / weightSum;
   while (weightIdx--) {
-    weightSum[weightIdx] *= weightNorm;
+    weights[weightIdx] *= weightNorm;
   }
   return weights;
 }
 
 static const char * blurKernel = "\
 __kernel blur(__global uchar4 * input, __global uchar4 * output, \
-              __global float * weights, int radius) { \
-  // TODO: apply the blur defined by weights to the input. \
+              __global float * weights, int radius, int width) { \
+  int globalX = get_global_id(0); \
+  int globalY = get_global_id(1); \
+  int inputRow = globalX + globalY*width; \
+  int weightIdx = 0; \
+  float4 outputFloat = {0, 0, 0, 0}; \
+  for (int y = globalY-radius; y <= globalY+radius; ++y) { \
+    for (int x = globalX-radius; x <= globalX+radius; ++x) { \
+      float4 fIn = (float4)input[inputRow + x]; \
+      float weight = weights[weightIdx++]; \
+      outputFloat += fIn * weight; \
+    } \
+    inputRow += width; \
+  } \
+  output[globalX + globalY*width] = (uchar4)outputFloat; \
 } \
 ";
 
-typedef struct {
-  cl_platform_id platform;
-  cl_device_id device;
-  cl_context context;
-  cl_command_queue queue;
-  cl_mem inputBuffer;
-  cl_mem outputBuffer;
-  cl_mem weightBuffer;
-  cl_program program;
-  cl_kernel kernel;
-} context;
-
 static context * context_create(size_t bitmapSize, void * input, void * output,
-                                void * weights, cl_int radius) {
+                                void * weights, cl_int radius, cl_int width) {
   cl_uint resultCount;
   cl_int statusCode;
 
@@ -167,6 +189,11 @@ static context * context_create(size_t bitmapSize, void * input, void * output,
     return NULL;
   }
 
+  if (clSetKernelArg(ctx->kernel, 4, sizeof(width), &width)) {
+    context_destroy(ctx);
+    return NULL;
+  }
+
   return ctx;
 }
 
@@ -189,9 +216,9 @@ static int context_run(context * ctx, size_t radius, size_t width, size_t height
 }
 
 static void context_destroy(context * ctx) {
-  if (ctx->context) {
-    clFlush(ctx->context);
-    clFinish(ctx->context);
+  if (ctx->queue) {
+    clFlush(ctx->queue);
+    clFinish(ctx->queue);
   }
   if (ctx->program) {
     clReleaseProgram(ctx->program);

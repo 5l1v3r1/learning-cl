@@ -1,6 +1,7 @@
 #include <OpenCL/opencl.h>
 #include <stdio.h>
 #include "bmp.h"
+#include "blur.h"
 
 int main(int argc, const char ** argv) {
   if (argc != 3) {
@@ -14,7 +15,7 @@ int main(int argc, const char ** argv) {
     return 1;
   }
 
-  // TODO: blur the image and write it to a file here.
+  blur_image(inputImage, 10, 3);
 
   if (bmp_write(inputImage, argv[2])) {
     fprintf(stderr, "Could not create output image: %s\n", argv[2]);
