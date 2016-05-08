@@ -27,13 +27,13 @@ int blur_image(bmp_t * image, int radius, cl_float sigma) {
     return -1;
   }
 
-  cl_uchar4 * output = malloc(sizeof(cl_uchar4) * image->width * image->height);
+  size_t bitmapSize = sizeof(cl_uchar4) * image->width * image->height;
+  cl_uchar4 * output = malloc(bitmapSize);
   if (!output) {
     free(weights);
     return -1;
   }
 
-  size_t bitmapSize = image->width * image->height * sizeof(cl_uchar4);
   context * ctx = context_create(bitmapSize, image->pixels, output, weights,
     radius, image->width);
   if (!ctx) {
@@ -119,6 +119,7 @@ static context * context_create(size_t bitmapSize, void * input, void * output,
   }
 
   context * ctx = (context *)malloc(sizeof(context));
+  bzero(ctx, sizeof(context));
   ctx->platform = platform;
   ctx->device = device;
 

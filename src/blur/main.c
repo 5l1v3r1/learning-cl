@@ -15,7 +15,10 @@ int main(int argc, const char ** argv) {
     return 1;
   }
 
-  blur_image(inputImage, 10, 3);
+  if (blur_image(inputImage, 10, 3)) {
+    fprintf(stderr, "Blur operation failed.\n");
+    return 1;
+  }
 
   if (bmp_write(inputImage, argv[2])) {
     fprintf(stderr, "Could not create output image: %s\n", argv[2]);
