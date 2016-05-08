@@ -1,7 +1,10 @@
 #include "blur.h"
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define PRINT_PROGRAM_LOG 1
 
 typedef struct {
   cl_platform_id platform;
@@ -82,22 +85,22 @@ static cl_float * make_weights(int radius, cl_float sigma) {
 }
 
 static const char * blurKernel = "\
-__kernel blur(__global uchar4 * input, __global uchar4 * output, \
+__kernel void blur(__global uchar4 * input, __global uchar4 * output, \
               __global float * weights, int radius, int width) { \
   int globalX = get_global_id(0); \
   int globalY = get_global_id(1); \
   int inputRow = globalX + globalY*width; \
   int weightIdx = 0; \
-  float4 outputFloat = {0, 0, 0, 0}; \
+  float4 outputFloat = 0; \
   for (int y = globalY-radius; y <= globalY+radius; ++y) { \
     for (int x = globalX-radius; x <= globalX+radius; ++x) { \
-      float4 fIn = (float4)input[inputRow + x]; \
+      float4 fIn = convert_float4(input[inputRow + x]); \
       float weight = weights[weightIdx++]; \
       outputFloat += fIn * weight; \
     } \
     inputRow += width; \
   } \
-  output[globalX + globalY*width] = (uchar4)outputFloat; \
+  output[globalX + globalY*width] = convert_uchar4_sat(outputFloat); \
 } \
 ";
 
@@ -167,6 +170,17 @@ static context * context_create(size_t bitmapSize, void * input, void * output,
   }
 
   if (clBuildProgram(ctx->program, 1, &device, NULL, NULL, NULL)) {
+    if (PRINT_PROGRAM_LOG) {
+      size_t logSize;
+      clGetProgramBuildInfo(ctx->program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &logSize);
+
+      char * logInfo = (char *)malloc(logSize);
+      clGetProgramBuildInfo(ctx->program, device, CL_PROGRAM_BUILD_LOG, logSize, logInfo, NULL);
+
+      printf("%s\n", logInfo);
+      free(logInfo);
+    }
+
     context_destroy(ctx);
     return NULL;
   }
