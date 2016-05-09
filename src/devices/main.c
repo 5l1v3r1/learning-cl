@@ -39,7 +39,7 @@ int main() {
   for (cl_uint i = 0; i < platformCount; ++i) {
     cl_uint deviceCount;
     cl_device_id devices[MAX_DEVICES];
-    if (clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_GPU, MAX_DEVICES, devices, &deviceCount)) {
+    if (clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, MAX_DEVICES, devices, &deviceCount)) {
       fprintf(stderr, "Failed to list devices.\n");
       return 1;
     }
