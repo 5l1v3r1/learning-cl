@@ -63,8 +63,9 @@ bmp_t * bmp_read(const char * path) {
     }
   }
 
+  fclose(fp);
+
   if (!pixelData) {
-    fclose(fp);
     return NULL;
   }
 

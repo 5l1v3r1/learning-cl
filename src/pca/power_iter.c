@@ -1,4 +1,5 @@
 #include "power_iter.h"
+#include <math.h>
 #include <string.h>
 
 #define ROW_MATRIX_BUFF 0
@@ -12,6 +13,7 @@
 static cl_float random_float();
 static int write_output_vector(power_iter_t * iter);
 static int read_output_vector(power_iter_t * iter);
+static void normalize_output(power_iter_t * iter);
 
 static const char * multProgram = "\
 __kernel void apply(__global float3 * mat, int cols, \
@@ -127,7 +129,7 @@ int power_iter_run(power_iter_t * iter, int iterations) {
     return -1;
   }
 
-  // TODO: normalize the output vector.
+  normalize_output(iter);
 
   return 0;
 }
@@ -162,4 +164,18 @@ static int read_output_vector(power_iter_t * iter) {
   }
   context_unmap(iter->context, COL_OUTPUT_BUFF, mappedInput);
   return 0;
+}
+
+static void normalize_output(power_iter_t * iter) {
+  for (size_t i = 0; i < 3; ++i) {
+    cl_float mag = 0;
+    for (size_t j = 0; j < iter->vectorSize; ++j) {
+      cl_float val = iter->vector[j].s[i];
+      mag += val * val;
+    }
+    cl_float recip = 1.0f / sqrtf(mag);
+    for (size_t j = 0; j < iter->vectorSize; ++j) {
+      iter->vector[j].s[i] *= recip;
+    }
+  }
 }

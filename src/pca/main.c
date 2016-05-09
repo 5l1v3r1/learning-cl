@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
@@ -6,8 +7,13 @@
 #include "matrix.h"
 #include "power_iter.h"
 
+#define MIN(x,y) (x < y ? x : y)
+#define MAX(x,y) (-(MIN(-x,-y)))
+
 bmp_t ** read_bitmaps(const char * dir, size_t * countOut);
 void free_bitmaps(bmp_t ** bmps, size_t count);
+bmp_t * vec_to_image(cl_float3 * vec, size_t width, size_t height);
+void vec_to_image_chan(size_t chan, cl_float3 * vec, cl_uchar4 * out, size_t count);
 
 int main(int argc, const char ** argv) {
   if (argc != 3) {
@@ -21,6 +27,14 @@ int main(int argc, const char ** argv) {
     fprintf(stderr, "Failed to read bitmaps.\n");
     return 1;
   }
+
+  if (bmpCount == 0) {
+    fprintf(stderr, "No images.\n");
+    return 1;
+  }
+
+  size_t width = bitmaps[0]->width;
+  size_t height = bitmaps[0]->height;
 
   matrix_t * rowMatrix = matrix_for_image_rows(bitmaps, bmpCount);
   free_bitmaps(bitmaps, bmpCount);
@@ -37,11 +51,28 @@ int main(int argc, const char ** argv) {
     return 1;
   }
 
-  // TODO: run the power iterator here and wait
-  // until the answer converges.
-  power_iter_run(iter, 1);
+  printf("Running power iteration...\n");
 
+  for (int i = 0; i < 100; ++i) {
+    power_iter_run(iter, 1);
+  }
+
+  printf("Generating output file...\n");
+
+  bmp_t * outImage = vec_to_image(iter->vector, width, height);
   power_iter_free(iter);
+
+  int res = outImage ? bmp_write(outImage, argv[2]) : -1;
+  if (outImage) {
+    bmp_free(outImage);
+  }
+
+  if (res) {
+    fprintf(stderr, "Failed to write output image.\n");
+    return -1;
+  }
+
+  return 0;
 }
 
 bmp_t ** read_bitmaps(const char * dir, size_t * countOut) {
@@ -77,4 +108,44 @@ void free_bitmaps(bmp_t ** bmps, size_t count) {
     bmp_free(bmps[i]);
   }
   free(bmps);
+}
+
+bmp_t * vec_to_image(cl_float3 * vec, size_t width, size_t height) {
+  bmp_t * output = (bmp_t *)malloc(sizeof(bmp_t));
+  if (!output) {
+    return NULL;
+  }
+
+  output->pixels = malloc(sizeof(cl_uchar4) * width * height);
+  if (!output->pixels) {
+    free(output);
+    return NULL;
+  }
+
+  output->width = width;
+  output->height = height;
+
+  for (size_t i = 0; i < 3; ++i) {
+    vec_to_image_chan(i, vec, output->pixels, width*height);
+  }
+
+  return output;
+}
+
+void vec_to_image_chan(size_t chan, cl_float3 * vec, cl_uchar4 * out, size_t count) {
+  cl_float minValue = vec[0].s[chan];
+  cl_float maxValue = minValue;
+
+  for (size_t i = 1; i < count; ++i) {
+    minValue = MIN(minValue, vec[i].s[chan]);
+    maxValue = MAX(maxValue, vec[i].s[chan]);
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    cl_float3 v = vec[i];
+    cl_float num = v.s[chan] + minValue;
+    num /= (maxValue - minValue) / 255.0f;
+
+    out[i].s[chan] = (cl_uchar)num;
+  }
 }
